@@ -797,6 +797,31 @@ pre.wz-json { background:#0f1e33; color:#d6e2f5; padding:14px 16px; font-family:
 .wz-rchip .wz-code { color:var(--sn-blue); flex-shrink:0; }
 .wz-grp { font-size:11.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--sn-blue); margin:22px 0 4px; }
 select.wz-input { appearance:auto; }
+.wz-scen { display:flex; flex-wrap:wrap; gap:4px 14px; align-items:center; margin-top:8px; font-size:12.5px; color:#6b4a00; }
+.wz-scen-l { font-weight:700; text-transform:uppercase; letter-spacing:.6px; font-size:11px; }
+.wz-scen label { display:inline-flex; gap:5px; align-items:center; cursor:pointer; }
+.wz-scen input { accent-color:#b98a1e; }
+.wz-now { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); border:1px solid var(--sn-border); background:#fafbfd; }
+.wz-now-col { padding:14px 16px; min-width:0; }
+.wz-now-col + .wz-now-col { border-left:1px solid var(--sn-border); }
+.wz-now-foot { grid-column:1 / -1; padding:8px 16px; border-top:1px solid var(--sn-border); font-size:12.5px; color:var(--sn-muted); }
+.wz-dl.tight { grid-template-columns:minmax(110px,140px) minmax(0,1fr); border-top:none; }
+.wz-dl.tight dt, .wz-dl.tight dd { padding:5px 0; font-size:13.5px; }
+.wz-plan { list-style:none; display:grid; gap:0; }
+.wz-plan li { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; padding:9px 0; border-top:1px dashed #e0e0e0; }
+.wz-plan li:first-child { border-top:none; padding-top:2px; }
+.wz-plan-d { font-size:12.5px; font-weight:700; color:var(--sn-text); font-variant-numeric:tabular-nums; line-height:1.4; }
+.wz-plan-b { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.wz-plan-t { font-weight:600; font-size:14px; }
+.wz-plan-x { font-size:13px; color:var(--sn-sub); }
+.wz-plan-m { font-size:12px; color:var(--sn-muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.wz-src { font-size:10.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; padding:1px 6px; border:1px solid #b3c9ef; color:#1251a3; background:#fff; border-radius:2px; }
+.wz-callout.bad { background:#fdecea; border-color:#f1aeab; color:#7a1712; }
+.wz-tag.sd { background:#8a4b00; }
+@media (max-width: 680px) {
+  .wz-now { grid-template-columns:1fr; }
+  .wz-now-col + .wz-now-col { border-left:none; border-top:1px solid var(--sn-border); }
+}
 @media (max-width: 680px) {
   .wz-overlay { padding:0; }
   .wz { min-height:100%; border:none; box-shadow:none; }
@@ -955,6 +980,7 @@ select.wz-input { appearance:auto; }
         <div class="wz-eyebrow">Arbeidsovereenkomst · <span id="wz-sub"></span></div>
         <h2 class="wz-title" id="wz-title" tabindex="-1">Werktijd en rooster wijzigen</h2>
         <span class="wz-demo">Demo met voorbeeldgegevens · er wordt niets naar SuccessFactors gestuurd</span>
+        <div class="wz-scen" id="wz-scen"></div>
       </div>
       <button class="wz-x" onclick="closeWizard()" aria-label="Sluiten">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1640,6 +1666,75 @@ function wzFlexOpts() {
 }
 const flexLabel = () => { const o = wzFlexOpts().find(x => x[0] === W.flex); return o ? o[1] : '—'; };
 
+// ── Geplande en lopende wijzigingen (dummy, uit SF EmpJob future-dated + ServiceNow cases) ──
+const PLAN_ALL = {
+  toekomst:   { id:'toekomst', label:'Toekomstmutatie in SF', bron:'SuccessFactors', datum:'2027-01-01',
+                titel:'Periodieke verhoging (trede 7 → 8)', detail:'Toekomstig EmpJob-record, gebaseerd op 32 uur en rooster 32A1', status:'Verwerkt, nog niet ingegaan' },
+  ouderschap: { id:'ouderschap', label:'Lopend ouderschapsverlof', bron:'ServiceNow', datum:'2026-09-01', eind:'2027-06-30', dag:'do',
+                titel:'Gedeeltelijk betaald ouderschapsverlof', detail:'8 uur per week op donderdag, berekend op 32 uur per week', status:'Lopend' },
+  reis:       { id:'reis', label:'Openstaand verzoek reisverklaring', bron:'ServiceNow', datum:'2026-10-20',
+                titel:'Wijziging reisverklaring', detail:'Ingediend op 20 oktober 2026', status:'Wacht op goedkeuring' }
+};
+const SCEN = { toekomst:true, ouderschap:true, reis:false };
+const PLAN = () => Object.values(PLAN_ALL).filter(x => SCEN[x.id]);
+function wzScen(id, on) { SCEN[id] = on; wzRender(); }
+function isoToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// Payroll cut-off: de maand is dicht na de 10e. Ingangsdatum in een dichte maand = herberekening met terugwerkende kracht.
+function payrollDicht(iso) {
+  if (!iso) return false;
+  const d = new Date(); let y = d.getFullYear(), m = d.getMonth() + 1;
+  if (d.getDate() <= 10) { m--; if (!m) { m = 12; y--; } }
+  return iso.slice(0, 7) <= y + '-' + String(m).padStart(2, '0');
+}
+const PERIODE_EIND = () => W.type === 'tijd' ? (W.end || W.start) : '9999-12-31';
+
+// Samenloop: ernst 'sd' = HRM SD kijkt mee (niet blokkerend), 'block' = eerst oplossen
+function wzConflicts() {
+  const c = [];
+  if (!W || !W.type || !W.start) return c;
+  const f = PLAN_ALL.toekomst, o = PLAN_ALL.ouderschap;
+  if (SCEN.toekomst && W.start <= f.datum) {
+    if (W.type !== 'tijd' || f.datum <= PERIODE_EIND()) {
+      c.push({ id:'toekomst', ernst:'sd',
+        titel: (W.start === f.datum ? 'Op dezelfde datum' : 'Per ' + fmtK(f.datum)) + ' staat al een wijziging in SuccessFactors',
+        tekst: 'De ' + f.titel.toLowerCase().replace(/ \(.*\)/, '') + ' is gebaseerd op je huidige werktijd (' + fmtN(CUR.uren) + ' uur, rooster ' + (CUR_R ? CUR_R.code : '') + '). SuccessFactors neemt je nieuwe ' + (W.type === 'flex' ? 'rooster' : 'werktijd en rooster') + ' daar niet automatisch in over. Zonder aanpassing zou je per ' + fmtD(f.datum) + ' terugvallen naar je oude situatie. We werken dat record bij en de HRM Servicedesk controleert het.',
+        taak: 'Toekomstig EmpJob-record per ' + f.datum + ' bijwerken naar nieuwe werktijd/rooster' });
+    } else {
+      c.push({ id:'toekomst', ernst:'info', titel:'Geplande wijziging per ' + fmtK(f.datum) + ' valt na je terugkeer',
+        tekst:'Die blijft gebaseerd op je oude werktijd. Dat klopt, want op dat moment werk je weer ' + fmtN(CUR.uren) + ' uur.' });
+    }
+  }
+  if (SCEN.ouderschap && W.start <= o.eind && PERIODE_EIND() >= o.datum) {
+    if (W.type !== 'flex' && +W.uren !== CUR.uren) {
+      c.push({ id:'ouderschap', ernst:'sd', titel:'Je hebt lopend ouderschapsverlof',
+        tekst:'Je verlof is berekend op ' + fmtN(CUR.uren) + ' uur per week. Met een werktijd van ' + fmtN(W.uren) + ' uur verandert je verlofrecht en het aantal verlofuren per week. De HRM Servicedesk rekent dit opnieuw door en neemt contact met je op.',
+        taak: 'Ouderschapsverlof herberekenen op basis van ' + fmtN(W.uren) + ' uur per week' });
+    }
+    const dagWeg = +W.rooster[o.dag] === 0 || (W.twee && +W.roosterB[o.dag] === 0);
+    if (dagWeg) {
+      c.push({ id:'ouderschap-dag', ernst:'sd', titel:'Je verlofdag valt weg in je nieuwe rooster',
+        tekst:'Je neemt ouderschapsverlof op donderdag, maar in je nieuwe rooster werk je ' + (W.twee ? 'op donderdag niet elke week' : 'op donderdag niet') + '. Spreek met je leidinggevende een andere verlofdag af. De HRM Servicedesk past je verlof daarop aan.',
+        taak: 'Verlofdag ouderschapsverlof verplaatsen (donderdag vervalt in nieuw rooster)' });
+    }
+  }
+  if (payrollDicht(W.start)) {
+    c.push({ id:'cutoff', ernst:'sd', titel:'Je ingangsdatum valt in een afgesloten salarisperiode',
+      tekst:'De salarisadministratie herberekent je salaris met terugwerkende kracht. Daarom kijkt de HRM Servicedesk mee. Kies een latere ingangsdatum als dat kan.',
+      taak: 'Herberekening met terugwerkende kracht vanaf ' + W.start + ' afstemmen met salarisadministratie' });
+  }
+  if (SCEN.reis && W.reis === 'ja') {
+    c.push({ id:'reis', ernst:'block', titel:'Je hebt al een openstaand verzoek voor je reisverklaring',
+      tekst:'Dat verzoek (ingediend op 20 oktober) wacht nog op goedkeuring. Twee wijzigingen tegelijk kunnen elkaar overschrijven. Wacht tot het is afgerond, trek het in via Mijn verzoeken, of kies hierboven "Nee" en pas je reisverklaring later aan.' });
+  }
+  return c;
+}
+const fmtK = iso => fmtD(iso).replace(/^\S+ /, '');
+const sdConf = () => wzConflicts().filter(x => x.ernst === 'sd');
+function confHtml(list) {
+  return list.map(x => '<div class="wz-callout ' + (x.ernst === 'block' ? 'bad' : x.ernst === 'sd' ? 'warn' : '') + '"><div class="wz-callout-t">' + x.titel
+    + (x.ernst === 'sd' ? ' <span class="wz-tag sd">HRM SD kijkt mee</span>' : '') + '</div>' + x.tekst + '</div>').join('');
+}
+
 // ── Validatie per stap ──
 function wzCheck() {
   const s = W.step;
@@ -1662,7 +1757,8 @@ function wzCheck() {
   }
   if (s === 4) {
     if (!W.reis) return 'Geef aan of je reispatroon verandert.';
-    if (W.reis === 'nee' && reisMoet()) return 'Je hebt minder werkdagen dan reisdagen. Kies "Ja" en pas je reisverklaring aan.';
+    if (W.reis === 'ja' && SCEN.reis) return 'Je hebt al een openstaand verzoek voor je reisverklaring. Rond dat eerst af of kies "Nee".';
+    if (W.reis === 'nee' && reisMoet() && !SCEN.reis) return 'Je hebt minder werkdagen dan reisdagen. Kies "Ja" en pas je reisverklaring aan.';
     if (W.reis === 'ja') {
       if (!(+W.rv.km > 0 && +W.rv.km <= 500)) return 'Vul je enkele reisafstand in kilometers in.';
       const rd = +W.rv.reisdagen;
@@ -1682,6 +1778,8 @@ function wzRender() {
     return '<div class="wz-step ' + c + '"><span class="n">' + (n < W.step ? '✓' : n) + '</span><span class="lbl">' + l + '</span></div>';
   }).join('');
   $('wz-sub').textContent = W.submitted ? 'Ingediend' : 'Stap ' + W.step + ' van ' + WZ_STEPS.length;
+  $('wz-scen').innerHTML = W.submitted ? '' : '<span class="wz-scen-l">Demo-scenario</span>' + Object.values(PLAN_ALL).map(x =>
+    '<label><input type="checkbox" id="wz-scen-' + x.id + '"' + (SCEN[x.id] ? ' checked' : '') + ' onchange="wzScen(\'' + x.id + '\',this.checked)"> ' + x.label + '</label>').join('');
   $('wz-body').innerHTML = W.submitted ? wzDone() : [null, wzS1, wzS2, wzS3, wzS4, wzS5][W.step]();
   $('wz-foot').hidden = W.submitted;
   $('wz-prev').textContent = W.step === 1 ? 'Annuleren' : 'Vorige';
@@ -1710,8 +1808,30 @@ function opt(type, name, id, checked, onchange, title, desc) {
 }
 
 // Stap 1
+function wzNow() {
+  const cr = CUR.reis, pl = PLAN();
+  const row = (k, v) => '<dt>' + k + '</dt><dd>' + v + '</dd>';
+  return '<div class="wz-now">'
+    + '<div class="wz-now-col"><div class="wz-panel-t">Je situatie nu</div><dl class="wz-dl tight">'
+    + row('Werktijd', '<b>' + fmtN(CUR.uren) + ' uur</b> per week')
+    + row('Werktijdsfactor', fmtF(CUR.uren))
+    + row('Werkdagen', dagen(CUR.rooster) + ' per week')
+    + row('Rooster', (CUR_R ? '<span class="wz-code">' + CUR_R.code + '</span> ' : '') + rStr(CUR.rooster))
+    + row('Flexibele werkduur', CUR.flex)
+    + row('Reisverklaring', cr.vervoer + ', ' + cr.km + ' km, ' + cr.reisdagen + ' reisdagen')
+    + '</dl></div>'
+    + '<div class="wz-now-col"><div class="wz-panel-t">Gepland en lopend</div>'
+    + (pl.length ? '<ul class="wz-plan">' + pl.map(x =>
+        '<li><span class="wz-plan-d">' + (x.eind ? fmtD(x.datum).replace(/^\w+ /, '') + ' –<br>' + fmtD(x.eind).replace(/^\w+ /, '') : fmtD(x.datum).replace(/^\w+ /, '')) + '</span>'
+        + '<span class="wz-plan-b"><span class="wz-plan-t">' + x.titel + '</span><span class="wz-plan-x">' + x.detail + '</span>'
+        + '<span class="wz-plan-m"><span class="wz-src">' + x.bron + '</span>' + x.status + '</span></span></li>').join('') + '</ul>'
+      : '<p class="wz-help" style="padding:8px 0">Geen geplande of lopende wijzigingen.</p>')
+    + '</div>'
+    + '<div class="wz-now-foot">Opgehaald uit SuccessFactors en ServiceNow om ' + new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) + '. Klopt hier iets niet? Neem dan eerst contact op met de HRM Servicedesk.</div>'
+    + '</div>';
+}
 function wzS1() {
-  return '<div class="wz-q">Wat wil je wijzigen?</div>'
+  return wzNow() + '<div class="wz-q" style="margin-top:24px">Wat wil je wijzigen?</div>'
     + '<p class="wz-hint">Als je werktijd wijzigt, verandert ook je rooster. Je rooster bepaalt hoe je vakantietegoed wordt aangepast. Daarom vragen we je beide in één keer.</p>'
     + '<div class="wz-options">'
     + Object.entries(WZ_TYPES).map(([k, o]) => opt('radio', 'wz-type', 'wz-type-' + k, W.type === k, "wzType('" + k + "')", o.t, o.d)).join('')
@@ -1784,7 +1904,8 @@ function wzS3() {
     + '</tr></tfoot></table></div>'
     + '<button class="wz-link-btn" onclick="wzSpread()">Verdeel mijn werktijd gelijk over de dagen met uren</button>'
     + '</div></div>'
-    + '<div id="wz-rstatus"></div>';
+    + '<div id="wz-rstatus"></div>'
+    + '<div id="wz-conf"></div>';
   return h;
 }
 function hrIn(key, id, k, label) {
@@ -1831,6 +1952,11 @@ function wzLive() {
     }
     rs.innerHTML = rh;
   }
+  const cf = $('wz-conf');
+  if (cf) {
+    const list = wzConflicts().filter(x => x.id !== 'reis');
+    cf.innerHTML = list.length ? '<div class="wz-sugg-t" style="margin-top:20px">Samenloop met andere wijzigingen</div>' + confHtml(list) : '';
+  }
   const hf = $('wz-herleef');
   if (hf) hf.textContent = W.end ? 'Je oude werktijd herleeft op ' + fmtD(herleef()) + '.' : '';
 }
@@ -1867,6 +1993,11 @@ function wzS4() {
     + opt('radio', 'wz-reis', 'wz-reis-ja', W.reis === 'ja', "wzReisKeuze('ja')", 'Ja, ik pas mijn reisverklaring nu aan', 'Je reiskosten- en thuiswerkvergoeding gaan mee in dezelfde wijziging.')
     + opt('radio', 'wz-reis', 'wz-reis-nee', W.reis === 'nee', "wzReisKeuze('nee')", 'Nee, ik reis evenveel als nu')
     + '</div>';
+  if (SCEN.reis && W.reis !== 'ja') {
+    h += '<div class="wz-callout" style="margin-top:12px">Let op: je hebt al een openstaand verzoek voor je reisverklaring (ingediend op 20 oktober).</div>';
+  }
+  h += confHtml(wzConflicts().filter(x => x.id === 'reis'));
+  if (SCEN.reis && W.reis === 'ja') return h;
   if (W.reis === 'ja') {
     const r = W.rv;
     h += '<div class="wz-grid2" style="margin-top:16px">'
@@ -1926,8 +2057,10 @@ function wzPayload() {
     rooster: rLabel(nieuw), doorlooptijd: '2-3 werkdagen',
     daarna: 'workscheduleCode invullen op EmpJob en record vrijgeven'
   });
+  sdConf().forEach(x => taken.push({ systeem:'ServiceNow', type:'HR Task', toegewezenAan:'HRM Servicedesk', omschrijving:x.taak, reden:x.titel }));
   const code = fr ? fr.code : 'NIEUW (wordt aangemaakt door HRM SD)';
   const sf = [];
+  const fc = wzConflicts().find(x => x.id === 'toekomst' && x.ernst === 'sd');
   if (W.type === 'tijd') {
     const s2 = W.auto ? 'Future-dated, automatisch ingepland' : 'Door medewerker in te dienen na verwerking record 1';
     sf.push(job(W.start, W.uren, nieuw, code, 'WTW_TIJDELIJK_START'));
@@ -1940,7 +2073,10 @@ function wzPayload() {
     sf.push(job(W.start, W.uren, nieuw, code, W.type === 'flex' ? 'ROOSTER_FLEXWERKDUUR' : 'WTW_STRUCTUREEL'));
     if (W.reis === 'ja') sf.push(reis(W.start, null, W.rv, wkDagen()));
   }
+  if (fc) sf.push(job(PLAN_ALL.toekomst.datum, W.uren, nieuw, code, 'BESTAAND: periodieke verhoging',
+    { actie:'Bijwerken bestaand toekomstig record (alleen werktijd- en roostervelden)', status:'Na controle HRM SD' }));
   return {
+    controleBijIndienen: 'EmpJob, WorkSchedule en reisverklaring opnieuw gelezen; lastModifiedDateTime gelijk aan start flow',
     verzoek: 'HRSD-WTW-0001 (dummy)',
     goedkeuring: W.type === 'tijd' && !W.auto ? 'Leidinggevende, per wijziging' : 'Leidinggevende, één taak voor alle records',
     takenVoorafgaand: taken,
@@ -1976,10 +2112,13 @@ function wzS5() {
       + (t === 'tijd' ? row('Terugzetten', W.auto ? 'Automatisch per ' + fmtD(herleef()) : 'Zelf, met wijziging 2') : '')
     : row('Reisverklaring', 'Blijft gelijk'));
   if (penRisk()) h += grp('Pensioen', row('Aandachtspunt', 'Verlaging van je werktijd in 2026. Check de compensatie voor 40-plussers: ' + lnk(LINKS.pensioen, 'Wegwijs in pensioen')));
+  const cs = wzConflicts().filter(x => x.ernst !== 'block');
+  if (cs.length) h += grp('Samenloop met andere wijzigingen', cs.map(x => row(x.titel, x.ernst === 'sd' ? 'HRM Servicedesk kijkt mee' : 'Geen actie nodig')).join(''));
+  const redenen = (nr ? ['je rooster nog niet bestaat'] : []).concat(sdConf().length ? ['de HRM Servicedesk de samenloop controleert'] : []);
   h += grp('Verwerking',
       row('Goedkeuring door', CUR.leiding)
     + (t === 'tijd' ? row('Terugkeer oude werktijd', W.auto ? 'Automatisch ingepland' : 'Zelf indienen na verwerking') : '')
-    + row('Verwachte doorlooptijd', nr ? '<b>2–3 werkdagen</b> na goedkeuring, omdat je rooster nog niet bestaat' : 'Direct na goedkeuring'));
+    + row('Verwachte doorlooptijd', redenen.length ? '<b>2–3 werkdagen</b> na goedkeuring, omdat ' + redenen.join(' en ') : 'Direct na goedkeuring'));
   if (nr) {
     h += '<div class="wz-callout warn"><div class="wz-callout-t">Dit rooster is nog niet beschikbaar</div>'
       + 'De HRM Servicedesk maakt het rooster aan in SuccessFactors. Verwerking duurt daardoor 2–3 werkdagen. Ligt je ingangsdatum dichtbij? Kies dan bij stap 3 een bestaand rooster.</div>';
@@ -2003,20 +2142,23 @@ function wzTrack(items) {
     '<div class="wz-ti ' + s + '"><span class="wz-dot">' + (s === 'done' ? '✓' : '') + '</span><div><div class="wz-ti-t">' + t + '</div><div class="wz-ti-d">' + d + '</div></div></div>').join('') + '</div>';
 }
 function wzDone() {
-  const t = W.type, a = W.approved, nr = !findR(), sd = !nr || W.sd, klaar = a && sd;
+  const t = W.type, a = W.approved, nr = !findR(), sdl = sdConf(), sdNodig = nr || sdl.length > 0, sd = !sdNodig || W.sd, klaar = a && sd;
   const st = (done, now) => done ? 'done' : now ? 'now' : '';
   const items = [
     ['Ingediend', fmtN(W.uren) + ' uur, ' + fmtN(wkDagen()) + ' werkdagen, vanaf ' + fmtD(W.start) + (t === 'tijd' && W.auto ? ', inclusief terugkeer' : ''), 'done'],
     ['Goedkeuring leidinggevende', a ? 'Goedgekeurd door ' + CUR.leiding : 'Taak staat bij ' + CUR.leiding, st(a, !a)]
   ];
-  if (nr) items.push(['Rooster aanmaken door HRM Servicedesk', W.sd ? 'Rooster aangemaakt en gekoppeld' : 'Je rooster bestond nog niet. Verwachte doorlooptijd 2–3 werkdagen.', st(W.sd, a && !W.sd)]);
+  if (sdNodig) {
+    const wat = (nr ? ['nieuw rooster aanmaken'] : []).concat(sdl.map(x => ({ toekomst:'geplande wijziging per 1 januari bijwerken', ouderschap:'ouderschapsverlof herberekenen', 'ouderschap-dag':'verlofdag verplaatsen', cutoff:'herberekening met salarisadministratie afstemmen' })[x.id]));
+    items.push(['Controle en aanvulling door HRM Servicedesk', W.sd ? 'Afgerond: ' + wat.join(', ') : wat.join(', ').replace(/^./, m => m.toUpperCase()) + '. Verwachte doorlooptijd 2–3 werkdagen.', st(W.sd, a && !W.sd)]);
+  }
   items.push(['Verwerkt in SuccessFactors', 'Werktijd, rooster' + (W.reis === 'ja' ? ', reisverklaring' : '') + ' en vakantietegoed', st(klaar, false)]);
   if (t === 'tijd' && W.auto) items.push(['Terugkeer ingepland', 'Terug naar ' + fmtN(CUR.uren) + ' uur' + (W.reis === 'ja' ? ' en oude reisverklaring' : '') + ' op ' + fmtD(herleef()), st(klaar, false)]);
   let h = '<div class="wz-callout ok" style="margin-top:0"><div class="wz-callout-t">✓ ' + (t === 'tijd' && !W.auto ? 'Wijziging 1 is ingediend' : 'Je wijziging is ingediend') + '</div>'
-    + 'Je leidinggevende heeft een taak gekregen om goed te keuren.' + (nr ? ' Omdat je rooster nog niet bestaat, maakt de HRM Servicedesk het daarna aan.' : '') + ' Je volgt de status via Mijn verzoeken.</div>'
+    + 'We hebben je gegevens bij het indienen opnieuw gecontroleerd in SuccessFactors. Er was niets gewijzigd sinds je begon. Je leidinggevende heeft een taak gekregen om goed te keuren.' + (sdNodig ? ' Daarna kijkt de HRM Servicedesk mee.' : '') + ' Je volgt de status via Mijn verzoeken.</div>'
     + wzTrack(items);
   if (!a) h += '<button class="wz-demo-btn" onclick="W.approved=true;wzRender()">Demo: leidinggevende keurt goed</button>';
-  else if (!sd) h += '<button class="wz-demo-btn" onclick="W.sd=true;wzRender()">Demo: HRM Servicedesk maakt rooster aan</button>';
+  else if (!sd) h += '<button class="wz-demo-btn" onclick="W.sd=true;wzRender()">Demo: HRM Servicedesk rondt af</button>';
   if (t === 'tijd' && !W.auto) {
     h += '<div class="wz-sec"><div class="wz-card' + (klaar ? '' : ' later') + '">'
       + '<div class="wz-card-l">Wijziging 2 · terugkeer naar je oude werktijd</div>'
